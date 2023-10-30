@@ -2,6 +2,9 @@ module ProfileCanvas
 
 using Profile, JSON, REPL, Pkg.Artifacts, Base64
 
+using FlameGraphs: NodeData
+using LeftChildRightSiblingTrees
+
 export @profview, @profview_allocs
 
 struct ProfileData
@@ -20,6 +23,25 @@ mutable struct ProfileFrame
     taskId::Union{Missing,UInt}
     children::Vector{ProfileFrame}
 end
+
+function Base.convert(::Type{ProfileFrame}, node::Node{NodeData})
+    data_args = nodedata_to_frame_attributes(node.data)
+    children = map(child -> convert(ProfileFrame, child), node)
+    ProfileFrame(data_args..., children)
+end
+
+function nodedata_to_frame_attributes((;sf, status, span)::NodeData)
+    func = string(sf.func)
+    file = string(sf.file)
+    path = ""
+    line = sf.line
+    count = length(span)
+    countLabel = missing
+    flags = status
+    tasksID = missing
+    (func, file, path, line, count, countLabel, flags, tasksID)
+end
+
 
 struct ProfileDisplay <: Base.Multimedia.AbstractDisplay end
 
