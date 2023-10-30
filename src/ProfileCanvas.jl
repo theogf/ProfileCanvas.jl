@@ -24,10 +24,28 @@ mutable struct ProfileFrame
     children::Vector{ProfileFrame}
 end
 
+function emptyframe(count::Int)
+    ProfileFrame("", "", "", 0, count, missing, 0x0, missing, ProfileFrame[])
+end
+
+function foo()
+    rand(4)
+end
+
 function Base.convert(::Type{ProfileFrame}, node::Node{NodeData})
     data_args = nodedata_to_frame_attributes(node.data)
-    children = map(child -> convert(ProfileFrame, child), node)
-    ProfileFrame(data_args..., children)
+    span = node.data.span
+    i = first(span)
+    children = ProfileFrame[]
+    for child in node
+        frame, child_span = convert(ProfileFrame, child)
+        if first(child_span) > i
+            push!(children, emptyframe(first(child_span) - i))
+        end
+        push!(children, frame)
+        i = last(child_span)
+    end
+    ProfileFrame(data_args..., children), span
 end
 
 function nodedata_to_frame_attributes((;sf, status, span)::NodeData)
