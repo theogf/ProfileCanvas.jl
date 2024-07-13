@@ -60,7 +60,7 @@ end
 
 """
 Execute `@snoopi_deep` from `SnoopCompile` on the expressionand show the inference tree as 
-a flamegraph as HTML. 
+an HTML flamegraph. 
 """
 macro snoop_view(expr)
     quote
