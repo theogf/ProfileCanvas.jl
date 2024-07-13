@@ -4,62 +4,36 @@ using Profile, JSON, REPL, Pkg.Artifacts, Base64
 
 using FlameGraphs: NodeData
 using LeftChildRightSiblingTrees
+using UUIDs: uuid4
 
-export @profview, @profview_allocs
+export @profview, @profview_allocs, @snoop_view
 
-struct ProfileData
-    data
-    typ
-end
-
+macro snoop_view end
 mutable struct ProfileFrame
     func::String
-    file::String # human readable file name
-    path::String # absolute path
-    line::Int # 1-based line number
-    count::Int # number of samples in this frame
-    countLabel::Union{Missing,String} # defaults to `$count samples`
-    flags::UInt8 # any or all of ProfileFrameFlag
+    "Human readable file name."
+    file::String
+    "Absolute path."
+    path::String
+    "1-based line number."
+    line::Int
+    "Number of samples in this frame."
+    count::Int
+    "defaults to count samples"
+    countLabel::Union{Missing,String}
+    "any or all of [`ProfileFrameFlag`](@ref)."
+    flags::UInt8
     taskId::Union{Missing,UInt}
     children::Vector{ProfileFrame}
 end
 
-function emptyframe(count::Int)
-    ProfileFrame("", "", "", 0, count, missing, 0x0, missing, ProfileFrame[])
+"Wrapper for display, contains data for each thread and a global name."
+struct ProfileData
+    "Dictionary mapping, threads (e.g. all, 1, 2, etc...) to the profiling data."
+    data::Dict{String,Any}
+    "Name used for display."
+    typ::String
 end
-
-function foo()
-    rand(4)
-end
-
-function Base.convert(::Type{ProfileFrame}, node::Node{NodeData})
-    data_args = nodedata_to_frame_attributes(node.data)
-    span = node.data.span
-    i = first(span)
-    children = ProfileFrame[]
-    for child in node
-        frame, child_span = convert(ProfileFrame, child)
-        if first(child_span) > i
-            push!(children, emptyframe(first(child_span) - i))
-        end
-        push!(children, frame)
-        i = last(child_span)
-    end
-    ProfileFrame(data_args..., children), span
-end
-
-function nodedata_to_frame_attributes((;sf, status, span)::NodeData)
-    func = string(sf.func)
-    file = string(sf.file)
-    path = ""
-    line = sf.line
-    count = length(span)
-    countLabel = missing
-    flags = status
-    tasksID = missing
-    (func, file, path, line, count, countLabel, flags, tasksID)
-end
-
 
 struct ProfileDisplay <: Base.Multimedia.AbstractDisplay end
 
@@ -79,7 +53,6 @@ end
 function jlprofile_data_uri()
     path = joinpath(artifact"jlprofilecanvas", "jl-profile.js-0.5.2", "dist", "profile-viewer.js")
     str = read(path, String)
-
     return string("data:text/javascript;base64,", base64encode(str))
 end
 
@@ -99,9 +72,6 @@ function Base.show(io::IO, ::MIME"text/html", canvas::ProfileData)
 end
 
 function Base.display(_::ProfileDisplay, canvas::ProfileData)
-    rootpath = artifact"jlprofilecanvas"
-    path = joinpath(rootpath, "jl-profile.js-0.5.2", "dist", "profile-viewer.js")
-
     file = html_file(string(tempname(), ".html"), canvas)
     url = "file://$file"
 
@@ -119,8 +89,7 @@ html_file(filename, data=Profile.fetch(); kwargs...) = html_file(filename, view(
 function html_file(file::AbstractString, canvas::ProfileData)
     @assert endswith(file, ".html")
     open(file, "w") do io
-        id = "profiler-container-$(round(Int, rand()*100000))"
-
+        id = "profiler-container-$(uuid4())"
         println(
             io,
             """
@@ -163,7 +132,10 @@ const ProfileFrameFlag = (
     GCEvent=UInt8(2^1),
     REPL=UInt8(2^2),
     Compilation=UInt8(2^3),
-    TaskEvent=UInt8(2^4)
+    TaskEvent=UInt8(2^4),
+    # See SnoopCompileProfileCanvasExt for use.
+    SnoopCompile=UInt8(2^5),
+    Invisible=UInt8(2^6),
 )
 
 function view(data=Profile.fetch(); C=false, kwargs...)
@@ -420,14 +392,16 @@ function view_allocs(_results=Profile.Allocs.fetch(); C=false)
     return ProfileData(d, "Allocation")
 end
 
-const prefixes = ["bytes", "KB", "MB", "GB", "TB", "PB", "EB", "ZB", "YB"]
-function memory_size(size)
+const memory_suffixes = ["bytes", "KB", "MB", "GB", "TB", "PB", "EB", "ZB", "YB"]
+memory_size(size) = append_suffix(size, memory_suffixes)
+
+function append_suffix(value, suffixes)
     i = 1
-    while size > 1000 && i + 1 < length(prefixes)
-        size /= 1000
+    while value > 1000 && i + 1 < length(suffixes)
+        value /= 1000
         i += 1
     end
-    return string(round(Int, size), " ", prefixes[i])
+    return string(round(Int, value), " ", suffixes[i])
 end
 
 end
